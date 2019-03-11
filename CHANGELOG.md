@@ -1,5 +1,9 @@
 # Poise-Python Changelog
 
+## v1.7.2 (Shareaholic release)
+
+* Remove process_dependency_links entirely to support Pip 19.
+
 ## v1.7.1 (Shareaholic release)
 
 * Support for Pip 18.1.
