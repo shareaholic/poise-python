@@ -1,6 +1,6 @@
 # Poise-Python Changelog
 
-## v1.7.1
+## v1.7.1 (Shareaholic release)
 
 * Support for Pip 18.1.
 * Improved support for Python 3 on Ubuntu 18.04.
