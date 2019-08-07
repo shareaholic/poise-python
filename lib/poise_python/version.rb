@@ -16,5 +16,5 @@
 
 
 module PoisePython
-  VERSION = '1.7.3.pre'
+  VERSION = '1.7.3'
 end
