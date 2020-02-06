@@ -29,64 +29,6 @@ module PoisePython
     # (see PythonPackage::Resource)
     # @since 1.0.0
     module PythonPackage
-      # A Python snippet to check which versions of things pip would try to
-      # install. Probably not 100% bulletproof.
-      PIP_HACK_SCRIPT = <<-EOH
-import json
-import re
-import sys
-
-import pip
-# Don't use pkg_resources because I don't want to require it before this anyway.
-if re.match(r'0\\.|1\\.|6\\.0', pip.__version__):
-  sys.stderr.write('The python_package resource requires pip >= 6.1.0, currently '+pip.__version__+'\\n')
-  sys.exit(1)
-
-try:
-  from pip.commands import InstallCommand
-  from pip.index import PackageFinder
-  from pip.req import InstallRequirement
-  install_req_from_line = InstallRequirement.from_line
-except ImportError:
-  # Pip 10 moved all internals to their own package.
-  from pip._internal.commands import InstallCommand
-  from pip._internal.index import PackageFinder
-  try:
-    # Pip 18.1 moved from_line to the constructors
-    from pip._internal.req.constructors import install_req_from_line
-  except ImportError:
-    from pip._internal.req import InstallRequirement
-    install_req_from_line = InstallRequirement.from_line
-
-packages = {}
-cmd = InstallCommand()
-options, args = cmd.parse_args(sys.argv[1:])
-with cmd._build_session(options) as session:
-  if options.no_index:
-    index_urls = []
-  else:
-    index_urls = [options.index_url] + options.extra_index_urls
-  finder_options = dict(
-    find_links=options.find_links,
-    index_urls=index_urls,
-    allow_all_prereleases=options.pre,
-    trusted_hosts=options.trusted_hosts,
-    session=session,
-  )
-  if getattr(options, 'format_control', None):
-    finder_options['format_control'] = options.format_control
-  finder = PackageFinder(**finder_options)
-  find_all = getattr(finder, 'find_all_candidates', getattr(finder, '_find_all_versions', None))
-  for arg in args:
-    req = install_req_from_line(arg)
-    found = finder.find_requirement(req, True)
-    all_candidates = find_all(req.name)
-    candidate = [c for c in all_candidates if c.location == found]
-    if candidate:
-      packages[candidate[0].project.lower()] = str(candidate[0].version)
-json.dump(packages, sys.stdout)
-EOH
-
       # A `python_package` resource to manage Python installations using pip.
       #
       # @provides python_package
@@ -223,8 +165,8 @@ EOH
             version_data[name][:current] = current
           end
           # Check for newer candidates.
-          outdated = pip_outdated(pip_requirements(resource.package_name, version, parse: true)).stdout
-          Chef::JSONCompat.parse(outdated).each do |name, candidate|
+          outdated = pip_outdated(pip_requirements(resource.package_name, version, parse: true))
+          outdated.each do |name, candidate|
             # Merge candidates in to the existing versions.
             version_data[name][:candidate] = candidate
           end
@@ -348,14 +290,36 @@ EOH
           pip_command('install', :install, cmd)
         end
 
-        # Run my hacked version of `pip list --outdated` with a specific set of
-        # package requirements.
+        # Run `pip list --outdated` with Shareaholic-specific logic.
         #
         # @see #pip_requirements
         # @param requirements [Array<String>] Pip-formatted package requirements.
-        # @return [Mixlib::ShellOut]
+        # @return [Hash<String, String>] package -> version
         def pip_outdated(requirements)
-          pip_command(nil, :list, requirements, input: PIP_HACK_SCRIPT, pip_runner: %w{-})
+          # Normally `pip list --outdated` will list the latest version, and it can be hard to tell
+          # whether that means a dependency is actually outdated. eg if foo==3.0 is available but
+          # you pin it to foo<3, `pip list --outdated` will still list foo=3.0 as the latest.
+          # But at Shareaholic, our requirements.txt is always pinned to the specific version
+          # instead of using range or is unranged. So we just need to compare our input
+          # requirements vs what the command returns.
+          cmd = pip_command('list', :list, %w{--outdated})
+          # output format looks like
+          # Package    Version Latest Type
+          # ---------- ------- ------ -----
+          # pip        19.2.3  20.0.2 wheel
+
+          # Convert to req -> requested version
+          outdated = cmd.stdout.each_line.drop(2).map do |line|
+            line = line.split(/ +/)
+            [line[0], line[2]]
+          end.to_h
+
+          result = requirements.map do |r|
+            r, v = r.split('==')
+            [r, outdated[r] || v || '']
+          end.to_h
+
+          result
         end
 
         # Parse the output from `pip list`. Returns a hash of package key to
