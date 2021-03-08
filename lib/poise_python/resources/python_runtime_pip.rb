@@ -31,10 +31,10 @@ module PoisePython
       PIP_INPLACE_VERSION = Gem::Version.create('7.0.0')
 
       # Version to trigger the automatic get-pip.py URL fixup on for 2.6 compat.
-      PY26_FIXUP_VERSION = Gem::Version.create('2.7')
+      PY27_FIXUP_VERSION = Gem::Version.create('3.0')
 
-      # Replacement URL for 2.6 compat.
-      PY26_FIXUP_GETPIP_URL = 'https://bootstrap.pypa.io/2.6/get-pip.py'
+      # Replacement URL for 2.7 compat.
+      PY27_FIXUP_GETPIP_URL = 'https://bootstrap.pypa.io/pip/2.7/get-pip.py'
 
       # A `python_runtime_pip` resource to install/upgrade pip itself. This is
       # used internally by `python_runtime` and is not intended to be a public
@@ -113,6 +113,16 @@ module PoisePython
           # switch to a 2.6-compatible version. This kind of sucks because it
           # makes the default a magic value but it seems like the safest option.
           get_pip_url = new_resource.get_pip_url
+          if get_pip_url == 'https://bootstrap.pypa.io/get-pip.py'
+            python_version_cmd = poise_shell_out!([new_resource.parent.python_binary, '--version'], environment: new_resource.parent.python_environment)
+            # Python 2 puts the output on stderr, 3 is on stdout. You can't make this shit up.
+            python_version = (python_version_cmd.stdout + python_version_cmd.stderr)[/Python (\S+)/, 1]
+            Chef::Log.debug("[#{new_resource}] Checking for Python 2.6 fixup of get-pip URL, found Python version #{python_version || '(unknown)'}")
+            if python_version && Gem::Version.create(python_version) < PY27_FIXUP_VERSION
+              Chef::Log.debug("[#{new_resource}] Detected old Python, enabling fixup")
+              get_pip_url = PY27_FIXUP_GETPIP_URL
+            end
+          end
 
           # Always updated if we have hit this point.
           converge_by("Bootstrapping pip #{new_resource.version || 'latest'} from #{get_pip_url}") do
